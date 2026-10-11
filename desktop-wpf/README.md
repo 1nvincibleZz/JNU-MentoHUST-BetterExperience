@@ -16,6 +16,16 @@
 
 热点选项默认关闭，保存在 `[WpfOptions] HotspotAfterSuccess`。首次认证成功后等待选定网卡联网，检查热点能力，使用有限查询、结束及等待权限核对 `8021x.exe`，在同一个句柄上结束一次并等待退出，再启动 Windows 移动热点。保留 `RJSuService` 与 MentoHUST 后台，SSID／密码沿用系统设置；自动重连、重复成功或动作失败不重复尝试。关闭和断开取消未完成流程，已经完成的系统动作保留。
 
+## 断网自动重连
+
+`[WpfOptions] AutoReconnect` 默认关闭，`ReconnectDelaySeconds` 默认 30，范围 5–300 秒。首次 Connected 之后启动独立监测，沿用当前会话的账号键和 pcap 网卡键。每 5 秒读取所选适配器的物理链路和 Windows Network List Manager 状态；不探测外部网站，不依据其他网卡的联网状态。只在该网卡曾报告 Internet 后使用 Internet 丢失信号，三次连续失联才进入等待；未知状态和从未报告 Internet 的环境不因 NCSI 而反复重连。
+
+物理链路未恢复时不发送认证请求。原引擎处于自动恢复状态时给予 90 秒恢复时间，再加配置的等待时间；每次重试串行 STOP／START，并间隔至少 90 秒加等待时间。后台意外退出时仅重新准备本客户端自己的后台，原认证源码和嵌入后台字节保持不变。手动断开／退出取消并等待正在执行的重连任务，重连保留本次会话的热点与最小化一次执行状态。
+
+原 `CertFlag` 的 `Reconnect` 字段仍按原格式保存，界面改称“后台探测（分）”，与新选项独立。
+
+运行 `pwsh -File .\desktop-wpf\tests\run-reconnection-checks.ps1 -OutputDirectory C:\Temp\mentohust-reconnect` 检查策略和取消；单文件程序的 `--ui-reconnect-checks C:\Temp\mentohust-ui-reconnect` 使用模拟后台验证共享 STOP／START 路径与取消按钮，无真实认证或断网。`ReconnectionChecks.exe --probe` 只读显示本机适配器的 Windows 状态。
+
 ## 单文件发布
 
 `EmbeddedEngine.cs` 将嵌入的原后台释放到 `%LOCALAPPDATA%\MentoHUST.Wpf\Engine\<SHA256>\MentoHUST.Engine.exe`，先核对已有缓存，损坏时用临时文件原子替换。有效缓存复用，后台字节保持不变；首次准备在工作线程执行。主程序仍通过私有管道调用独立后台，认证核心无需迁移。后台工作目录保持为主程序目录，兼容相对数据包路径。开发构建未嵌入后台时使用同目录 EXE。

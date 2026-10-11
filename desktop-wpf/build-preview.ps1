@@ -20,6 +20,7 @@ $arguments = @('/nologo', '/target:winexe', '/platform:anycpu', '/codepage:65001
   "/resource:$root\Assets\AppIcon.ico,MentoHUST.Desktop.AppIcon.ico",
   "/resource:$root\StartHotspot.ps1,MentoHUST.Desktop.StartHotspot.ps1",
     "$root\Program.cs", "$root\EmbeddedEngine.cs", "$root\SessionDraft.cs", "$root\EngineContract.cs", "$root\StartupAuthentication.cs",
+  "$root\AutomaticReconnection.cs", "$root\WindowsNetworkStatus.cs",
   "$root\LegacyCodec.cs", "$root\LegacyConfigurationStore.cs", "$root\AdapterCatalog.cs", "$root\ProcessEngineClient.cs", "$root\HotspotAfterAuthentication.cs", "$root\StartupRegistration.cs")
 if ($EngineExecutable) {
   $enginePath = (Resolve-Path -LiteralPath $EngineExecutable).Path

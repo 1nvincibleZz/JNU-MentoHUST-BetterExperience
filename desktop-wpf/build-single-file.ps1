@@ -2,7 +2,7 @@ param(
   [string]$OutputDirectory = '',
   [string]$EngineExecutable = '',
   [string]$VisualStudioRoot = 'D:\MicrosoftVisualStudio',
-  [string]$Version = 'v1.0.2-wpf'
+  [string]$Version = 'v1.0.3-wpf'
 )
 $ErrorActionPreference = 'Stop'
 $taskOutput = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $PSScriptRoot 'bin\SingleFile' }

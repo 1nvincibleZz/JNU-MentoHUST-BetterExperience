@@ -23,7 +23,8 @@ namespace MentoHUST.Desktop
     public sealed class SessionDraft
     {
         public ObservableCollection<AccountDraft> Accounts = new ObservableCollection<AccountDraft>();
-        public bool AutoRun, AutoAuthenticate, AutoMinimize, BindMac, UsePackage, HotspotAfterSuccess;
+        public bool AutoRun, AutoAuthenticate, AutoMinimize, BindMac, UsePackage, HotspotAfterSuccess, AutoReconnect;
+        public int ReconnectDelaySeconds = 30;
         public int Multicast = 1, Dhcp, Timeout = 8, EchoTime = 20, Reconnect;
         public string PackagePath = "", DefaultAccount = "", DefaultAdapter = "";
 
@@ -31,6 +32,7 @@ namespace MentoHUST.Desktop
         {
             var copy = new SessionDraft {
                 AutoRun = AutoRun, AutoAuthenticate = AutoAuthenticate, AutoMinimize = AutoMinimize,
+                AutoReconnect = AutoReconnect, ReconnectDelaySeconds = ReconnectDelaySeconds,
                 BindMac = BindMac, UsePackage = UsePackage, HotspotAfterSuccess = HotspotAfterSuccess, Multicast = Multicast, Dhcp = Dhcp,
                 Timeout = Timeout, EchoTime = EchoTime, Reconnect = Reconnect,
                 PackagePath = PackagePath, DefaultAccount = DefaultAccount, DefaultAdapter = DefaultAdapter

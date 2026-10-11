@@ -110,7 +110,9 @@ namespace MentoHUST.Desktop
                 UsePackage = Bit(flags[14], 2) != 0,
                 PackagePath = ini.Get("Parameters", "PackagePath", ""),
                 DefaultAccount = ini.Get("Parameters", "DefaultAccount", ""), DefaultAdapter = ini.Get("Parameters", "DefaultAdapter", ""),
-                HotspotAfterSuccess = ini.Get("WpfOptions", "HotspotAfterSuccess", "0") == "1"
+                HotspotAfterSuccess = ini.Get("WpfOptions", "HotspotAfterSuccess", "0") == "1",
+                AutoReconnect = ini.Get("WpfOptions", "AutoReconnect", "0") == "1",
+                ReconnectDelaySeconds = Math.Max(5, Math.Min(300, Number(ini.Get("WpfOptions", "ReconnectDelaySeconds", "30"), 30)))
             };
             int count = Number(ini.Get("Parameters", "AccountCount", "0"), 0);
             if (count < 0 || count > 10000) throw new InvalidDataException("账号数量无效。");
@@ -152,11 +154,15 @@ namespace MentoHUST.Desktop
                 draft.Reconnect < 0 || draft.Reconnect > 999 || draft.Multicast < 0 || draft.Multicast > 1 || draft.Dhcp < 0 || draft.Dhcp > 3)
                 throw new ArgumentException("参数超出旧客户端允许的范围。");
             var edited = document.Clone();
+            if (draft.ReconnectDelaySeconds < 5 || draft.ReconnectDelaySeconds > 300)
+                throw new ArgumentException("自动重连等待时间范围为 5–300 秒。");
             edited.Set("Parameters", "CertFlag", string.Format("{0}{1}{2}{3}{4}{5}{6:00}{7:000}{8:000}{9}",
                 draft.AutoRun ? 1 : 0, draft.AutoAuthenticate ? 1 : 0, draft.AutoMinimize ? 1 : 0, draft.BindMac ? 1 : 0,
                 draft.Multicast, draft.Dhcp, draft.Timeout, draft.EchoTime, draft.Reconnect, draft.UsePackage ? 1 : 0));
             edited.Set("Parameters", "PackagePath", draft.PackagePath ?? "");
             edited.Set("WpfOptions", "HotspotAfterSuccess", draft.HotspotAfterSuccess ? "1" : "0");
+            edited.Set("WpfOptions", "AutoReconnect", draft.AutoReconnect ? "1" : "0");
+            edited.Set("WpfOptions", "ReconnectDelaySeconds", draft.ReconnectDelaySeconds.ToString());
             var accountData = draft.Accounts.Select(a => document.SectionLines(a.SourceSection ?? "")).ToList();
             int oldCount = Number(document.Get("Parameters", "AccountCount", "0"), 0);
             for (int i = oldCount; i < draft.Accounts.Count; i++)
