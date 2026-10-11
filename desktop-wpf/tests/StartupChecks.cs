@@ -25,7 +25,7 @@ internal static class StartupChecks
             Directory.CreateDirectory(args[0]);
             string testDirectory = Path.Combine(args[0], "会话 with spaces " + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(testDirectory);
-            string executable = Path.Combine(testDirectory, "MentoHUST.Desktop.Preview.exe");
+            string executable = Path.Combine(testDirectory, "MentoHUST4JNU.exe");
             File.WriteAllText(executable, "test path only; never launched");
             var startup = new WindowsStartupRegistration(executable, testKey);
             var store = new LegacyConfigurationStore(Path.Combine(testDirectory, "Config.ini"));

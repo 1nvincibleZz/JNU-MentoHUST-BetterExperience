@@ -1,6 +1,6 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="JNU Campus Network · WPF 界面预览" Width="472" Height="586" MinWidth="450" MinHeight="566"
+        Title="MentoHUST4JNU · 界面预览" Width="472" Height="586" MinWidth="450" MinHeight="566"
         WindowStartupLocation="CenterScreen" Background="#F3F8FE" Foreground="#14243E" FontFamily="Microsoft YaHei UI" FontSize="13"
         TextOptions.TextFormattingMode="Display" UseLayoutRounding="True" SnapsToDevicePixels="True">
   <Grid Background="#F3F8FE">
@@ -122,6 +122,13 @@
                 <TextBlock Text="启动与认证" Style="{StaticResource Heading}"/>
                 <CheckBox x:Name="ParameterAutoRun" Content="开机后自动运行"/>
                 <CheckBox x:Name="AutoAuthenticate" Content="运行后自动认证"/>
+                <CheckBox x:Name="AutoReconnect" Content="断网后自动重连"/>
+                <StackPanel x:Name="ReconnectOptions" Orientation="Horizontal" Margin="38,0,0,7" IsEnabled="{Binding IsChecked, ElementName=AutoReconnect}">
+                  <TextBlock Text="重试前等待" VerticalAlignment="Center" FontSize="11" Foreground="{StaticResource Muted}"/>
+                  <TextBox x:Name="ReconnectDelaySeconds" Text="30" Width="48" Margin="8,0" Padding="6,4" AutomationProperties.Name="自动重连等待秒数"/>
+                  <TextBlock Text="秒" VerticalAlignment="Center" FontSize="11" Foreground="{StaticResource Muted}"/>
+                </StackPanel>
+                <TextBlock Text="首次认证成功后生效；手动断开或退出即停止。" TextWrapping="Wrap" FontSize="10" Foreground="{StaticResource Muted}" Margin="38,0,0,8"/>
                 <CheckBox x:Name="AutoMinimize" Content="认证成功后最小化到托盘"/>
                 <StackPanel Orientation="Horizontal">
                   <CheckBox x:Name="HotspotAfterSuccess" Content="认证后关闭锐捷并开启热点"/>
@@ -145,7 +152,7 @@
                   <TextBlock Grid.Row="1" Text="DHCP 方式" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="Dhcp" Grid.Row="1" Grid.Column="1" SelectedIndex="0"><ComboBoxItem Content="不使用"/><ComboBoxItem Content="二次认证"/><ComboBoxItem Content="认证后"/><ComboBoxItem Content="认证前"/></ComboBox>
                   <TextBlock Grid.Row="2" Text="认证超时（秒）" Style="{StaticResource FieldLabel}"/><TextBox x:Name="Timeout" Grid.Row="2" Grid.Column="1" Text="8"/>
                   <TextBlock Grid.Row="3" Text="心跳间隔（秒）" Style="{StaticResource FieldLabel}"/><TextBox x:Name="EchoTime" Grid.Row="3" Grid.Column="1" Text="20"/>
-                  <TextBlock Grid.Row="4" Text="重连间隔（分）" Style="{StaticResource FieldLabel}"/><TextBox x:Name="Reconnect" Grid.Row="4" Grid.Column="1" Text="0"/>
+                  <TextBlock Grid.Row="4" Text="后台探测（分）" Style="{StaticResource FieldLabel}"/><TextBox x:Name="Reconnect" Grid.Row="4" Grid.Column="1" Text="0"/>
                 </Grid>
                 <CheckBox x:Name="BindMac" Content="绑定网关 MAC"/>
                 <CheckBox x:Name="UsePackage" Content="使用自定义认证数据包"/>

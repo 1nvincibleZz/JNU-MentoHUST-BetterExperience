@@ -44,31 +44,33 @@ namespace MentoHUST.Desktop
                 bool configurationChecks = args.Length == 2 && args[0] == "--ui-config-checks";
                 bool engineChecks = args.Length == 2 && args[0] == "--ui-engine-checks";
                 bool automaticChecks = args.Length == 2 && args[0] == "--ui-auto-auth-checks";
+                bool reconnectionChecks = args.Length == 2 && args[0] == "--ui-reconnect-checks";
                 LegacyConfigurationStore store = null;
-                if (configurationChecks || engineChecks || automaticChecks) {
+                if (configurationChecks || engineChecks || automaticChecks || reconnectionChecks) {
                     Directory.CreateDirectory(args[1]);
                     store = new LegacyConfigurationStore(Path.Combine(args[1], "session-" + Guid.NewGuid().ToString("N"), "Config.ini"));
                     store.Load(); store.Save(SessionDraft.CreatePreview());
                 } else if (!memoryChecks && !(args.Length == 1 && args[0] == "--preview"))
                     store = new LegacyConfigurationStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MentoHUST.Wpf", "Config.ini"));
-                IStartupRegistration startup = configurationChecks || engineChecks || automaticChecks ? (IStartupRegistration)new MemoryStartupRegistration() :
+                IStartupRegistration startup = configurationChecks || engineChecks || automaticChecks || reconnectionChecks ? (IStartupRegistration)new MemoryStartupRegistration() :
                     store == null ? null : new WindowsStartupRegistration(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
-                var controller = new DesktopController(window, store, store != null && !configurationChecks && !automaticChecks, startup,
-                    !memoryChecks && !configurationChecks && !engineChecks && !automaticChecks, engineChecks ? Path.Combine(args[1], "engine-cache") : null);
+                var controller = new DesktopController(window, store, store != null && !configurationChecks && !automaticChecks && !reconnectionChecks, startup,
+                    !memoryChecks && !configurationChecks && !engineChecks && !automaticChecks && !reconnectionChecks, engineChecks ? Path.Combine(args[1], "engine-cache") : null);
                 if (args.Length == 1 && args[0] == "--startup") controller.LogStartup();
                 if (animationChecks) window.Loaded += async delegate { await controller.RunAnimationChecksAsync(args[1]); };
                 else if (memoryChecks || configurationChecks)
                     window.Loaded += async delegate { await controller.RunChecksAsync(args[1]); };
                 if (engineChecks) window.Loaded += async delegate { await controller.RunEngineChecksAsync(args[1]); };
                 if (automaticChecks) window.Loaded += async delegate { await controller.RunAutomaticChecksAsync(args[1]); };
+                if (reconnectionChecks) window.Loaded += async delegate { await controller.RunReconnectionChecksAsync(args[1]); };
                 app.Run(window);
                 return controller.ExitCode;
             } catch (Exception error) {
-                if (args.Length == 2 && (args[0] == "--ui-checks" || args[0] == "--ui-config-checks" || args[0] == "--ui-engine-checks" || args[0] == "--ui-animation-checks" || args[0] == "--ui-auto-auth-checks")) {
+                if (args.Length == 2 && (args[0] == "--ui-checks" || args[0] == "--ui-config-checks" || args[0] == "--ui-engine-checks" || args[0] == "--ui-animation-checks" || args[0] == "--ui-auto-auth-checks" || args[0] == "--ui-reconnect-checks")) {
                     Directory.CreateDirectory(args[1]); File.WriteAllText(Path.Combine(args[1], "checks.txt"), error.ToString());
                 }
                 else if (args.Length == 1 && args[0] == "--preview") Console.Error.WriteLine(error);
-                else MessageBox.Show(error.Message, "无法打开界面预览", MessageBoxButton.OK, MessageBoxImage.Error);
+                else MessageBox.Show(error.Message, "MentoHUST4JNU 无法启动", MessageBoxButton.OK, MessageBoxImage.Error);
                 return 1;
             }
         }
@@ -99,6 +101,12 @@ namespace MentoHUST.Desktop
         private readonly string engineCacheRoot;
         private bool authenticationRunning, authenticationBusy, closing, closeConfirmed;
         private bool handledSuccess;
+        private AuthenticationRequest activeRequest;
+        private AutomaticReconnection reconnection;
+        private bool cancellingReconnection;
+        private Task<NetworkObservation> networkProbe;
+        private Func<int, AutomaticReconnection> reconnectionFactory = seconds => new AutomaticReconnection(seconds);
+        private Func<string, CancellationToken, Task<NetworkObservation>> reconnectionProbe;
         private int automaticMinimizeVersion;
         private readonly HotspotAfterAuthentication hotspot = new HotspotAfterAuthentication(new WindowsHotspotActions());
         private AuthenticationState currentState = AuthenticationState.Disconnected;
@@ -133,12 +141,13 @@ namespace MentoHUST.Desktop
         public DesktopController(Window window, LegacyConfigurationStore configuration, bool useEngine = false, IStartupRegistration startup = null, bool allowAutomaticAuthentication = true, string engineCacheRoot = null)
         {
             this.window = window;
+            reconnectionProbe = ProbeReconnectionNetworkAsync;
             this.configuration = configuration;
             this.startup = startup;
             enableEngine = useEngine;
             this.engineCacheRoot = engineCacheRoot ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MentoHUST.Wpf", "Engine");
             if (configuration != null) committed = configuration.Load();
-            window.Title = configuration == null ? "JNU Campus Network · 界面预览" : "JNU Campus Network";
+            window.Title = configuration == null ? "MentoHUST4JNU · 界面预览" : "MentoHUST4JNU";
             using (var stream = Program.Resource("Emblem.png")) {
                 var sheet = BitmapFrame.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
                 var seal = new CroppedBitmap(sheet, new Int32Rect(0, 0, 500, 493)); seal.Freeze();
@@ -222,12 +231,17 @@ namespace MentoHUST.Desktop
             };
             window.Closing += async delegate(object sender, System.ComponentModel.CancelEventArgs e) {
                 automaticAuthentication.Cancel();
+                activeRequest = null;
+                if (reconnection != null) reconnection.Cancel();
                 automaticMinimizeVersion++;
                 hotspot.Cancel();
                 if (nativeClient == null || closeConfirmed) return;
                 e.Cancel = true; if (closing) return; closing = true;
                 authenticationBusy = true; UpdateAuthenticationControls();
-                try { await hotspot.CancelAndWaitAsync(); await nativeClient.ShutdownAsync(); }
+                try {
+                    if (reconnection != null) await reconnection.CancelAndWaitAsync();
+                    await hotspot.CancelAndWaitAsync(); await nativeClient.ShutdownAsync();
+                }
                 catch (Exception error) { Log("后台退出：" + error.Message); nativeClient.Dispose(); }
                 closeConfirmed = true; window.Close();
             };
@@ -262,9 +276,10 @@ namespace MentoHUST.Desktop
                 if (closing) return;
                 nativeClient = new ProcessEngineClient(executable, configuration.FilePath, false, AppDomain.CurrentDomain.BaseDirectory);
                 authentication = nativeClient;
+                var observedClient = nativeClient;
                 nativeClient.StateChanged += delegate(object sender, AuthenticationEvent update) {
                     window.Dispatcher.BeginInvoke(new Action(async delegate {
-                        if (closing) return;
+                        if (closing || !ReferenceEquals(authentication, observedClient)) return;
                         currentState = update.State;
                         if (update.State != AuthenticationState.Connected) automaticMinimizeVersion++;
                         if (!authentication.IsAvailable || update.State == AuthenticationState.Disconnected) authenticationRunning = false;
@@ -275,6 +290,7 @@ namespace MentoHUST.Desktop
                             handledSuccess = true; if (committed.AutoMinimize) minimize = MinimizeAfterSuccessAsync();
                             if (committed.HotspotAfterSuccess) Log("正在准备移动热点：等待认证网卡联网后，结束 8021x.exe 一次并开启热点");
                         }
+                        if (update.State == AuthenticationState.Connected) BeginReconnectionMonitoring();
                         try {
                             string result = await hotspot.HandleStateAsync(update.State);
                             if (!closing && !string.IsNullOrEmpty(result)) Log(result);
@@ -292,22 +308,28 @@ namespace MentoHUST.Desktop
 
         private void UpdateAuthenticationControls()
         {
-            bool locked = authenticationBusy || authenticationRunning || closing;
+            bool reconnecting = reconnection != null && reconnection.IsActive;
+            bool locked = authenticationBusy || authenticationRunning || reconnecting || cancellingReconnection || closing;
             foreach (string name in new[] { "AccountChoice", "AdapterChoice" }) Get<ComboBox>(name).IsEnabled = !locked;
             Get<Button>("OpenSettings").IsEnabled = Get<Button>("ImportConfiguration").IsEnabled = !locked;
             var account = Get<ComboBox>("AccountChoice").SelectedItem as AccountDraft;
             var adapter = Get<ComboBox>("AdapterChoice").SelectedItem as AdapterInfo;
-            Get<Button>("Authenticate").IsEnabled = !authenticationBusy && !closing && authentication.IsAvailable &&
-                (authenticationRunning || (account != null && account.PasswordReadable && !string.IsNullOrEmpty(account.SourceSection) && adapter != null && adapter.CaptureAvailable));
-            Get<TextBlock>("AuthenticateLabel").Text = authenticationBusy ? "请稍候…" : authenticationRunning ? "断开认证" : "开始认证";
+            Get<Button>("Authenticate").IsEnabled = !closing && !cancellingReconnection && (reconnecting || (!authenticationBusy && authentication.IsAvailable &&
+                (authenticationRunning || (account != null && account.PasswordReadable && !string.IsNullOrEmpty(account.SourceSection) && adapter != null && adapter.CaptureAvailable))));
+            bool waiting = reconnecting && (reconnection.IsWaiting || !authentication.IsAvailable || currentState != AuthenticationState.Connected);
+            Get<TextBlock>("AuthenticateLabel").Text = cancellingReconnection ? "正在断开…" : waiting ? "取消重连" : authenticationBusy ? "请稍候…" : authenticationRunning ? "断开认证" : "开始认证";
             Get<TextBlock>("EngineStatus").Text = nativeClient == null ? (enableEngine ? "认证服务不可用" : "界面预览") : !authentication.IsAvailable ? "认证服务不可用" :
                 currentState == AuthenticationState.Connected ? "校园网已连接" : authenticationRunning ? "认证进行中" : "点击开始认证";
             string[] labels = { "未认证", "寻找服务器", "发送账号", "验证中", "获取 IP", "已认证", "认证失败" };
             Get<TextBlock>("StateText").Text = labels[(int)currentState];
-            string color = currentState == AuthenticationState.Connected ? "#19976F" : currentState == AuthenticationState.Disconnected || currentState == AuthenticationState.Failed ? "#ED3652" : "#237CB7";
+            if (waiting) {
+                Get<TextBlock>("EngineStatus").Text = "等待网络恢复后自动重连";
+                Get<TextBlock>("StateText").Text = "等待重连";
+            }
+            string color = waiting ? "#237CB7" : currentState == AuthenticationState.Connected ? "#19976F" : currentState == AuthenticationState.Disconnected || currentState == AuthenticationState.Failed ? "#ED3652" : "#237CB7";
             var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
             Get<TextBlock>("StateText").Foreground = brush; Get<System.Windows.Shapes.Ellipse>("StateDot").Fill = brush;
-            Get<Border>("StateBadge").Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(currentState == AuthenticationState.Connected ? "#E1F5EB" : currentState == AuthenticationState.Disconnected || currentState == AuthenticationState.Failed ? "#FFE7EC" : "#E7F2FF"));
+            Get<Border>("StateBadge").Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(waiting ? "#E7F2FF" : currentState == AuthenticationState.Connected ? "#E1F5EB" : currentState == AuthenticationState.Disconnected || currentState == AuthenticationState.Failed ? "#FFE7EC" : "#E7F2FF"));
             Get<TextBlock>("ConfigurationStatus").Text = nativeClient == null ? (configuration == null ? "界面预览 · 更改仅保留在本窗口" : "设置保存至 WPF 独立配置副本 · 离线界面检查") :
                 automaticAuthentication.IsPending ? "正在等待网卡就绪后自动认证" : "WPF 独立配置 · 认证后台已接入";
         }
@@ -324,7 +346,8 @@ namespace MentoHUST.Desktop
             foreach (var process in System.Diagnostics.Process.GetProcesses()) {
                 using (process) {
                     try {
-                        if (process.Id != own && (process.ProcessName.StartsWith("MentoHUST.BetterUI", StringComparison.OrdinalIgnoreCase) ||
+                        if (process.Id != own && (process.ProcessName.StartsWith("MentoHUST4JNU", StringComparison.OrdinalIgnoreCase) ||
+                            process.ProcessName.StartsWith("MentoHUST.BetterUI", StringComparison.OrdinalIgnoreCase) ||
                             process.ProcessName.StartsWith("MentoHUST.Desktop.Preview", StringComparison.OrdinalIgnoreCase))) found = true;
                     } catch (InvalidOperationException) { }
                     catch (System.ComponentModel.Win32Exception) { }
@@ -366,12 +389,17 @@ namespace MentoHUST.Desktop
         private async Task ToggleAuthenticationAsync(bool automaticStart = false)
         {
             if (!automaticStart) automaticAuthentication.Cancel();
+            if (cancellingReconnection || closing) return;
+            if (!automaticStart && reconnection != null && reconnection.IsActive) {
+                await StopReconnectionSessionAsync(); return;
+            }
             if (authenticationBusy || closing || !authentication.IsAvailable) return;
             automaticMinimizeVersion++;
             bool stopping = authenticationRunning;
             authenticationBusy = true; UpdateAuthenticationControls();
             try {
                 if (stopping) {
+                    activeRequest = null;
                     await hotspot.CancelAndWaitAsync();
                     await authentication.StopAsync(CancellationToken.None); authenticationRunning = false; currentState = AuthenticationState.Disconnected;
                     committed = configuration.Load(); BindHome(); // Core may persist ClientType during authentication.
@@ -385,10 +413,89 @@ namespace MentoHUST.Desktop
                     syncing = true; try { BindHome(); } finally { syncing = false; }
                     authenticationRunning = true; handledSuccess = false;
                     hotspot.BeginSession(committed.HotspotAfterSuccess, adapter.Id);
-                    await authentication.StartAsync(new AuthenticationRequest { AccountKey = committed.DefaultAccount, AdapterKey = adapter.Id }, CancellationToken.None);
+                    activeRequest = new AuthenticationRequest { AccountKey = committed.DefaultAccount, AdapterKey = adapter.Id };
+                    await authentication.StartAsync(activeRequest, CancellationToken.None);
                 }
-            } catch (Exception error) { hotspot.Cancel(); authenticationRunning = false; currentState = AuthenticationState.Failed; Log(error.Message, AuthenticationState.Failed); }
+            } catch (Exception error) { activeRequest = null; hotspot.Cancel(); authenticationRunning = false; currentState = AuthenticationState.Failed; Log(error.Message, AuthenticationState.Failed); }
             finally { authenticationBusy = false; UpdateAuthenticationControls(); }
+        }
+
+        private void BeginReconnectionMonitoring()
+        {
+            if (!committed.AutoReconnect || currentState != AuthenticationState.Connected || activeRequest == null || closing || cancellingReconnection || reconnection != null) return;
+            var request = new AuthenticationRequest { AccountKey = activeRequest.AccountKey, AdapterKey = activeRequest.AdapterKey };
+            reconnection = reconnectionFactory(committed.ReconnectDelaySeconds);
+            reconnection.Start(token => reconnectionProbe(request.AdapterKey, token),
+                () => currentState, () => authentication.IsAvailable,
+                token => RetryAuthenticationAsync(request, token),
+                message => { if (!closing) Log(message); },
+                () => { if (!closing) UpdateAuthenticationControls(); });
+            Log("自动重连已启用：网络中断后等待 " + committed.ReconnectDelaySeconds + " 秒再尝试");
+        }
+
+        private async Task<NetworkObservation> ProbeReconnectionNetworkAsync(string adapterId, CancellationToken token)
+        {
+            // At most one read-only COM probe exists, even if Windows takes unusually long.
+            if (networkProbe == null || networkProbe.IsCompleted)
+                networkProbe = Task.Run(() => WindowsNetworkStatus.Read(adapterId));
+            Task completed = await Task.WhenAny(networkProbe, Task.Delay(5000, token));
+            token.ThrowIfCancellationRequested();
+            return completed == networkProbe ? await networkProbe : new NetworkObservation();
+        }
+
+        private async Task RetryAuthenticationAsync(AuthenticationRequest request, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            if (closing || cancellingReconnection || activeRequest == null) return;
+            authenticationBusy = true; UpdateAuthenticationControls();
+            try {
+                // Reconnect the current session, retaining its once-only hotspot/minimize handling.
+                if (authentication.IsAvailable) await authentication.StopAsync(token);
+                token.ThrowIfCancellationRequested();
+                if (!authentication.IsAvailable && nativeClient != null) {
+                    var failedClient = nativeClient;
+                    nativeClient = null; authentication = new UnavailableAuthenticationClient();
+                    failedClient.Dispose();
+                    engineInitialization = null;
+                }
+                if (!authentication.IsAvailable && enableEngine) await InitializeEngineAsync();
+                token.ThrowIfCancellationRequested();
+                if (closing || cancellingReconnection || activeRequest == null) return;
+                currentState = AuthenticationState.Starting; authenticationRunning = true;
+                await authentication.StartAsync(request, token);
+            } finally { authenticationBusy = false; if (!closing) UpdateAuthenticationControls(); }
+        }
+
+        private async Task StopReconnectionSessionAsync()
+        {
+            if (cancellingReconnection || closing) return;
+            cancellingReconnection = true; activeRequest = null; automaticMinimizeVersion++;
+            var pending = reconnection;
+            pending.Cancel(); UpdateAuthenticationControls();
+            try {
+                await pending.CancelAndWaitAsync();
+                await hotspot.CancelAndWaitAsync();
+                if (authentication.IsAvailable) await authentication.StopAsync(CancellationToken.None);
+                else if (enableEngine && nativeClient != null && !closing) {
+                    // Cancelling a bounded command can terminate our child. Restore idle readiness,
+                    // without sending START, so the user can manually connect again afterwards.
+                    var stoppedClient = nativeClient;
+                    nativeClient = null; authentication = new UnavailableAuthenticationClient();
+                    stoppedClient.Dispose(); engineInitialization = null;
+                    await InitializeEngineAsync();
+                }
+                Log("已手动断开，自动重连已取消");
+            } catch (Exception error) { Log("断开认证：" + error.Message); }
+            finally {
+                reconnection = null; authenticationRunning = authenticationBusy = cancellingReconnection = false;
+                currentState = AuthenticationState.Disconnected;
+                if (!closing) {
+                    // Reload core-persisted metadata, without overwriting any saved preferences.
+                    try { if (configuration != null) committed = configuration.Load(); }
+                    catch (Exception error) { Log("重新读取配置：" + error.Message); }
+                    BindHome(); UpdateAuthenticationControls();
+                }
+            }
         }
 
         private void BindHome()
@@ -441,7 +548,7 @@ namespace MentoHUST.Desktop
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MentoHUST.Wpf", "Config.ini"));
                 SessionDraft imported = target.Import(dialog.FileName);
                 configuration = target; committed = imported; BindHome(); BindAdapters(); UpdateConfigurationMode();
-                window.Title = "JNU Campus Network"; Log("旧配置已导入，原文件保持不变");
+                window.Title = "MentoHUST4JNU"; Log("旧配置已导入，原文件保持不变");
                 if (enableEngine && nativeClient == null) await InitializeEngineAsync(); else UpdateAuthenticationControls();
             } catch (Exception error) { MessageBox.Show(window, error.Message, "导入失败", MessageBoxButton.OK, MessageBoxImage.Warning); }
         }
@@ -463,6 +570,8 @@ namespace MentoHUST.Desktop
             syncing = true;
             Get<CheckBox>("AccountAutoRun").IsChecked = Get<CheckBox>("ParameterAutoRun").IsChecked = draft.AutoRun;
             Get<CheckBox>("AutoAuthenticate").IsChecked = draft.AutoAuthenticate;
+            Get<CheckBox>("AutoReconnect").IsChecked = draft.AutoReconnect;
+            Get<TextBox>("ReconnectDelaySeconds").Text = draft.ReconnectDelaySeconds.ToString();
             Get<CheckBox>("AutoMinimize").IsChecked = draft.AutoMinimize;
             Get<CheckBox>("HotspotAfterSuccess").IsChecked = draft.HotspotAfterSuccess;
             Get<CheckBox>("BindMac").IsChecked = draft.BindMac;
@@ -600,13 +709,16 @@ namespace MentoHUST.Desktop
         private void ApplySettings()
         {
             if (transitioning) return;
-            int timeout, echo, reconnect;
+            int timeout, echo, reconnect, reconnectDelay;
             if (!int.TryParse(Get<TextBox>("Timeout").Text, out timeout) || timeout < 0 || timeout > 99) { Error("认证超时范围为 0–99 秒"); return; }
             if (!int.TryParse(Get<TextBox>("EchoTime").Text, out echo) || echo < 0 || echo > 999) { Error("心跳间隔范围为 0–999 秒"); return; }
             if (!int.TryParse(Get<TextBox>("Reconnect").Text, out reconnect) || reconnect < 0 || reconnect > 999) { Error("重连间隔范围为 0–999 分"); return; }
+            if (!int.TryParse(Get<TextBox>("ReconnectDelaySeconds").Text, out reconnectDelay) || reconnectDelay < 5 || reconnectDelay > 300) { Error("自动重连等待时间范围为 5–300 秒"); return; }
             draft.Timeout = timeout; draft.EchoTime = echo; draft.Reconnect = reconnect;
             draft.AutoRun = Get<CheckBox>("AccountAutoRun").IsChecked == true;
             draft.AutoAuthenticate = Get<CheckBox>("AutoAuthenticate").IsChecked == true;
+            draft.AutoReconnect = Get<CheckBox>("AutoReconnect").IsChecked == true;
+            draft.ReconnectDelaySeconds = reconnectDelay;
             draft.AutoMinimize = Get<CheckBox>("AutoMinimize").IsChecked == true;
             draft.HotspotAfterSuccess = Get<CheckBox>("HotspotAfterSuccess").IsChecked == true;
             draft.BindMac = Get<CheckBox>("BindMac").IsChecked == true;
@@ -650,7 +762,7 @@ namespace MentoHUST.Desktop
         {
             automaticMinimizeVersion++;
             if (tray == null) {
-                tray = new Forms.NotifyIcon { Text = "JNU Campus Network" };
+                tray = new Forms.NotifyIcon { Text = "MentoHUST4JNU" };
                 using (var stream = Program.Resource("AppIcon.ico")) {
                     int size = Forms.SystemInformation.SmallIconSize.Width;
                     trayIcon = new System.Drawing.Icon(stream, size, size);
@@ -832,6 +944,7 @@ namespace MentoHUST.Desktop
             Directory.CreateDirectory(directory);
             try {
                 await Task.Delay(250); Capture(directory, "home");
+                Require(window.Title == (configuration == null ? "MentoHUST4JNU · 界面预览" : "MentoHUST4JNU"), "Window uses current product name");
                 Capture(directory, "header", Get<Grid>("BrandHeader"));
                 var originalLogs = Get<ListBox>("LogList").Items.Cast<object>().ToArray();
                 Get<Button>("ClearLog").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -839,6 +952,7 @@ namespace MentoHUST.Desktop
                 foreach (var entry in originalLogs) Get<ListBox>("LogList").Items.Add(entry);
                 Require(!Get<Button>("Authenticate").IsEnabled, "Preview must not authenticate");
                 Require(!committed.HotspotAfterSuccess, "Hotspot automation defaults off");
+                Require(!committed.AutoReconnect && committed.ReconnectDelaySeconds == 30, "Reconnect defaults off with 30-second wait");
                 double originalWidth = window.Width, originalHeight = window.Height;
                 window.Width = window.MinWidth; window.Height = window.MinHeight; await Task.Delay(100);
                 Require(Get<ListBox>("LogList").ActualHeight >= 40, "Minimum window keeps logs readable");
@@ -902,6 +1016,8 @@ namespace MentoHUST.Desktop
                 await Task.Delay(100); Capture(directory, "hotspot-help", (ToolTip)Get<Button>("HotspotHelp").ToolTip);
                 Get<Button>("HotspotHelp").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 Get<CheckBox>("HotspotAfterSuccess").IsChecked = true;
+                Get<CheckBox>("AutoReconnect").IsChecked = true;
+                Get<TextBox>("ReconnectDelaySeconds").Text = "45";
                 CheckFocusWithoutClickOutline(Get<RadioButton>("ParameterTab"));
                 CheckFocusWithoutClickOutline(Get<CheckBox>("AutoMinimize"));
                 CheckFocusWithoutClickOutline(Get<ComboBox>("Multicast"));
@@ -926,6 +1042,7 @@ namespace MentoHUST.Desktop
                 CheckFocusWithoutClickOutline(Get<Button>("OpenSettings")); Capture(directory, "home-return-focus");
                 Require(committed.Accounts.Count == original && committed.Timeout == 8, "Cancel rolls back accounts and parameters");
                 Require(!committed.HotspotAfterSuccess, "Cancel discards hotspot option");
+                Require(!committed.AutoReconnect && committed.ReconnectDelaySeconds == 30, "Cancel discards reconnect changes");
                 Require(committed.Accounts[0].Ip == originalIp, "Cancel restores hidden IP");
                 if (configuration != null) Require(File.ReadAllBytes(configuration.FilePath).SequenceEqual(originalFile), "Cancel leaves configuration bytes unchanged");
                 OpenSettings(); await Task.Delay(250);
@@ -933,16 +1050,20 @@ namespace MentoHUST.Desktop
                 Get<PasswordBox>("Password").Password = "dummy"; AddAccount();
                 Get<TextBox>("Username").Text = "preview_applied"; Get<PasswordBox>("Password").Password = "dummy"; AddAccount();
                 Get<CheckBox>("HotspotAfterSuccess").IsChecked = true;
+                Get<CheckBox>("AutoReconnect").IsChecked = true;
+                Get<TextBox>("ReconnectDelaySeconds").Text = "45";
                 Get<CheckBox>("AccountAutoRun").IsChecked = true;
                 Get<TextBox>("Timeout").Text = "10"; ApplySettings(); await Task.Delay(250);
                 if (memoryStartup != null) Require(memoryStartup.IsEnabled && memoryStartup.ApplyCount == 1 && committed.AutoRun, "Apply must register startup once");
                 Require(committed.Accounts.Count == original + 1 && committed.Timeout == 10, "Apply memory draft");
                 Require(committed.HotspotAfterSuccess, "Apply preserves hotspot option");
+                Require(committed.AutoReconnect && committed.ReconnectDelaySeconds == 45, "Apply preserves reconnect options");
                 Require(committed.Accounts[0].Ip == "192.0.2.17" && committed.Accounts.Last().Ip == "0.0.0.0", "Apply preserves existing IP and default for new account");
                 if (configuration != null) {
                     var reloaded = new LegacyConfigurationStore(configuration.FilePath).Load();
                     Require(reloaded.Accounts.Count == original + 1 && reloaded.Timeout == 10, "Apply persists legacy configuration");
                     Require(reloaded.HotspotAfterSuccess, "Hotspot option survives configuration reload");
+                    Require(reloaded.AutoReconnect && reloaded.ReconnectDelaySeconds == 45, "Reconnect options survive configuration reload");
                     Require(reloaded.AutoRun, "Startup option survives configuration reload");
                     Require(reloaded.Accounts[0].Ip == "192.0.2.17" && reloaded.Accounts.Last().Ip == "0.0.0.0", "Hidden IP values survive configuration reload");
                 }
@@ -952,7 +1073,7 @@ namespace MentoHUST.Desktop
                 OpenSettings(); await Task.Delay(250);
                 await CheckKeyboardFocusNavigationAsync(); Capture(directory, "settings-keyboard-focus");
                 CancelSettings(); await Task.Delay(250);
-                MinimizeToTray(); Require(!window.IsVisible && tray.Visible, "Tray hides window");
+                MinimizeToTray(); Require(!window.IsVisible && tray.Visible && tray.Text == "MentoHUST4JNU", "Tray hides window and uses current product name");
                 RestoreFromTray(); Require(window.IsVisible && !tray.Visible, "Tray restores window");
                 await CheckDelayedMinimizeAsync();
                 File.WriteAllText(Path.Combine(directory, "checks.txt"), "WPF_UI_CHECKS_PASS\nSingle window; combo selection; draft editing; password reveal; validation; option sync; rollback; apply; tray.\nMinimum window; long adapter display; scrollbar commands; data package fields reachable.\n" +
@@ -963,6 +1084,7 @@ namespace MentoHUST.Desktop
                     "Hotspot option defaults off; help tooltip opens; cancel rolls back; apply and reload preserve option. No hotspot action invoked by UI tests.\n" +
                     "Automatic tray delay: visible connected status for at least 500 ms; disconnect and manual restore cancel pending hide; disabled option leaves window visible. Isolated UI state only.\n" +
                     "Startup: account/parameter options enabled and synchronized; cancel has no registration effect; apply and reload use isolated memory registration.\n" +
+                    "Reconnect: defaults off; 30-second default; cancel rolls back; save/reload preserve option and custom wait.\n" +
                     (configuration == null ? "Memory preview: no configuration files changed.\n" : "Configuration mode: temporary config saved and reloaded; cancellation byte-identical.\n") +
                     "No registry settings or authentication packets were written.\n");
             } catch (Exception error) {
@@ -1058,6 +1180,88 @@ namespace MentoHUST.Desktop
                 File.WriteAllText(Path.Combine(directory, "checks.txt"), "WPF_AUTO_AUTH_CHECKS_PASS\nDelayed mock adapter; exact saved keys; shared StartAsync path once; duplicate request ignored; settings/manual start cancel pending automation; no manufactured success or early minimize.\nTemporary config and mock client only; no actual authentication, startup registry or hotspot action.\n");
             } catch (Exception error) { ExitCode = 1; File.WriteAllText(Path.Combine(directory, "checks.txt"), error.ToString()); }
             finally { authenticationRunning = false; window.Close(); }
+        }
+
+        private sealed class ReconnectionCheckClient : IAuthenticationClient
+        {
+            public int Starts, Stops;
+            public bool Available = true;
+            public Func<CancellationToken, Task> OnStart;
+            public Action OnStop;
+            public AuthenticationRequest LastRequest;
+            public bool IsAvailable { get { return Available; } }
+            public event EventHandler<AuthenticationEvent> StateChanged { add { } remove { } }
+            public async Task StartAsync(AuthenticationRequest request, CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested(); Starts++; LastRequest = request;
+                if (OnStart != null) await OnStart(token);
+            }
+            public Task StopAsync(CancellationToken token)
+            { token.ThrowIfCancellationRequested(); Stops++; if (OnStop != null) OnStop(); return Task.FromResult(0); }
+        }
+
+        internal async Task RunReconnectionChecksAsync(string directory)
+        {
+            Directory.CreateDirectory(directory);
+            try {
+                Require(nativeClient == null && configuration != null && !enableEngine, "Reconnect checks require an isolated mock client");
+                var client = new ReconnectionCheckClient(); authentication = client;
+                var testAdapter = new AdapterInfo { Id = "\\Device\\NPF_{00000000-0000-0000-0000-000000000001}", Name = "Isolated reconnect test", CaptureAvailable = true };
+                Get<ComboBox>("AdapterChoice").ItemsSource = new[] { testAdapter }; Get<ComboBox>("AdapterChoice").SelectedIndex = 0;
+                committed.AutoReconnect = true;
+                reconnectionFactory = seconds => new AutomaticReconnection(0, 5, 0);
+                bool link = true;
+                string probedAdapter = null;
+                reconnectionProbe = (id, token) => { probedAdapter = id; return Task.FromResult(new NetworkObservation { LinkUp = link }); };
+                await ToggleAuthenticationAsync();
+                Require(client.Starts == 1 && reconnection == null, "No monitor before the initial successful authentication");
+                currentState = AuthenticationState.Failed; BeginReconnectionMonitoring();
+                Require(reconnection == null, "Failed login must not arm retries");
+                currentState = AuthenticationState.Connected; handledSuccess = true;
+                committed.AutoReconnect = false; BeginReconnectionMonitoring();
+                Require(reconnection == null, "Disabled option must not start monitoring");
+                committed.AutoReconnect = true;
+                client.OnStop = () => { currentState = AuthenticationState.Disconnected; authenticationRunning = false; };
+                client.OnStart = token => { currentState = AuthenticationState.Connected; return Task.FromResult(0); };
+                BeginReconnectionMonitoring(); await Task.Delay(35);
+                Require(client.Starts == 1 && reconnection.IsActive, "Healthy connection requires no extra START");
+                link = false;
+                for (int n = 0; n < 200 && !reconnection.IsWaiting; n++) await Task.Delay(5);
+                Require(client.Starts == 1 && reconnection.IsWaiting && Get<Button>("Authenticate").IsEnabled &&
+                    Get<TextBlock>("AuthenticateLabel").Text == "取消重连", "Unplugged link waits with a usable cancel button");
+                Capture(directory, "reconnection-waiting");
+                link = true;
+                for (int n = 0; n < 200 && client.Starts < 2; n++) await Task.Delay(5);
+                Require(client.Starts == 2 && client.Stops == 1 && probedAdapter == testAdapter.Id &&
+                    client.LastRequest.AdapterKey == testAdapter.Id && client.LastRequest.AccountKey == committed.DefaultAccount,
+                    "Reconnect must STOP then START the exact account and selected adapter");
+                Require(handledSuccess, "Reconnect must retain once-only minimize/hotspot success handling");
+                byte[] configBefore = File.ReadAllBytes(configuration.FilePath);
+                await ToggleAuthenticationAsync(); await Task.Delay(30);
+                Require(client.Starts == 2 && reconnection == null && !authenticationRunning && !authenticationBusy &&
+                    configBefore.SequenceEqual(File.ReadAllBytes(configuration.FilePath)), "Manual disconnect cancels retries without rewriting configuration");
+
+                activeRequest = new AuthenticationRequest { AccountKey = committed.DefaultAccount, AdapterKey = testAdapter.Id };
+                authenticationRunning = true; currentState = AuthenticationState.Connected;
+                var entered = new TaskCompletionSource<bool>();
+                client.OnStart = async token => { entered.TrySetResult(true); await Task.Delay(10000, token); };
+                committed.AutoReconnect = true; BeginReconnectionMonitoring(); currentState = AuthenticationState.Failed;
+                Require(await Task.WhenAny(entered.Task, Task.Delay(2000)) == entered.Task, "Mock retry did not start");
+                Require(authenticationBusy && Get<Button>("Authenticate").IsEnabled, "Cancel remains enabled during a pending START");
+                await ToggleAuthenticationAsync(); await Task.Delay(30);
+                Require(client.Starts == 3 && reconnection == null && !authenticationBusy, "Cancel during START prevents any subsequent retry");
+
+                activeRequest = new AuthenticationRequest { AccountKey = committed.DefaultAccount, AdapterKey = testAdapter.Id };
+                authenticationRunning = true; currentState = AuthenticationState.Connected; client.Available = false;
+                reconnectionFactory = seconds => new AutomaticReconnection(30, 5, 90);
+                BeginReconnectionMonitoring(); UpdateAuthenticationControls();
+                Require(Get<Button>("Authenticate").IsEnabled, "Backend failure must still allow cancelling reconnect");
+                await ToggleAuthenticationAsync();
+                Require(client.Starts == 3 && reconnection == null, "Unavailable backend can be cancelled without START");
+                File.WriteAllText(Path.Combine(directory, "checks.txt"), "WPF_RECONNECTION_CHECKS_PASS\nDisabled and initial-failure protection; unplug waits; exact saved account/adapter; STOP then START; once-only success handling retained; cancel before/during START; unavailable backend remains cancellable.\nTemporary configuration and mock client only; no actual authentication, real network disruption, startup registration or hotspot action.\n");
+            } catch (Exception error) { ExitCode = 1; File.WriteAllText(Path.Combine(directory, "checks.txt"), error.ToString()); }
+            if (reconnection != null) { await reconnection.CancelAndWaitAsync(); reconnection = null; }
+            authenticationRunning = false; window.Close();
         }
 
         internal async Task RunEngineChecksAsync(string directory)

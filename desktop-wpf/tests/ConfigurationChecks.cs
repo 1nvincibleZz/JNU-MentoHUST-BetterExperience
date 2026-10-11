@@ -59,7 +59,12 @@ namespace MentoHUST.Desktop
                 Require(loaded.AutoRun && !loaded.AutoAuthenticate && loaded.AutoMinimize && !loaded.BindMac && loaded.Multicast == 1 && loaded.Dhcp == 1 &&
                     loaded.Timeout == 12 && loaded.EchoTime == 999 && loaded.Reconnect == 45 && loaded.UsePackage, "CertFlag mapping mismatch");
                 Require(loaded.DefaultAccount == "Account1" && loaded.PackagePath == "C:\\原数据\\payload.bin", "Default and path import mismatch");
-                var changed = loaded.Clone(); changed.Timeout = 8; var saved = store.Save(changed);
+                Require(!loaded.AutoReconnect && loaded.ReconnectDelaySeconds == 30, "Old INI must default reconnect off with 30-second wait");
+                var changed = loaded.Clone(); changed.Timeout = 8; changed.AutoReconnect = true; changed.ReconnectDelaySeconds = 45;
+                var saved = store.Save(changed);
+                Require(saved.AutoReconnect && saved.ReconnectDelaySeconds == 45 &&
+                    Native(target, "WpfOptions", "AutoReconnect") == "1" && Native(target, "WpfOptions", "ReconnectDelaySeconds") == "45",
+                    "Reconnect options must save independently of legacy flags");
                 Require(Native(target, "Parameters", "CertFlag") == "101011089990451", "Native reader sees wrong flags");
                 Require(Native(target, "Account1", "Password") == "bad@@@", "Opaque password was changed");
                 Require(Native(target, "Parameters", "ExtraFlag") == "15021" && Native(target, "Parameters", "Ruijie6Mode") == "1" &&
@@ -80,6 +85,11 @@ namespace MentoHUST.Desktop
                 byte[] snapshot = File.ReadAllBytes(target); var invalid = saved.Clone(); invalid.Timeout = 100;
                 bool rejected = false; try { store.Save(invalid); } catch (ArgumentException) { rejected = true; }
                 Require(rejected && Same(snapshot, File.ReadAllBytes(target)), "Invalid parameters changed config");
+                foreach (int badDelay in new[] { 0, 4, 301 }) {
+                    invalid = saved.Clone(); invalid.ReconnectDelaySeconds = badDelay; rejected = false;
+                    try { store.Save(invalid); } catch (ArgumentException) { rejected = true; }
+                    Require(rejected && Same(snapshot, File.ReadAllBytes(target)), "Invalid reconnect delay must not modify config");
+                }
                 invalid = saved.Clone(); invalid.Accounts[0].Username = "bad\nname"; rejected = false;
                 try { store.Save(invalid); } catch (ArgumentException) { rejected = true; }
                 Require(rejected && Same(snapshot, File.ReadAllBytes(target)), "Failed serialization changed config");

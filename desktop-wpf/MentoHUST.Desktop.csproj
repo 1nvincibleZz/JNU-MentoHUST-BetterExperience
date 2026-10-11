@@ -5,7 +5,8 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <EnableDefaultPageItems>false</EnableDefaultPageItems>
-    <AssemblyName>MentoHUST.Desktop.Preview</AssemblyName>
+    <AssemblyName>MentoHUST4JNU</AssemblyName>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <RootNamespace>MentoHUST.Desktop</RootNamespace>
     <ApplicationIcon>Assets/AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
