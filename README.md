@@ -25,6 +25,8 @@
 
 打开 [Release 下载页面](https://github.com/1nvincibleZz/mentohust-windows-jnu-BetterUI/releases)，下载 `MentoHUST-BetterUI-版本号.zip`。
 
+当前正式版：[v1.0.3](https://github.com/1nvincibleZz/mentohust-windows-jnu-BetterUI/releases/tag/v1.0.3)，下载 `MentoHUST-BetterUI-v1.0.3.zip`。
+
 请下载程序 ZIP，日常使用不需要下载 GitHub 自动提供的 `Source code`。
 
 将 ZIP 解压到一个固定文件夹，再打开 `MentoHUST.BetterUI.exe`。压缩包只有主程序和 `README.txt`，认证后台已包含在主程序里，不需要另外打开第二个 EXE。
@@ -75,6 +77,8 @@ Windows 11 已自带所需的 .NET Framework，不需要安装 Visual Studio、P
 首次认证成功后开始监测。拔掉网线时会等待，重新插好后再尝试；原后台正在恢复时，会额外给它约 90 秒时间。重连沿用本次连接的账号和网卡，不重复执行关闭锐捷和开启热点。
 
 点击“断开认证”或“取消重连”，或退出程序，就会停止自动重连。收起到托盘后仍然有效。这个选项默认关闭，与“运行后自动认证”分别设置。
+
+维护者已在自己的电脑上实测：设备管理器禁用后恢复联网网卡，客户端自动恢复认证，状态和“断开认证”按钮显示正常。
 
 ## 构建
 

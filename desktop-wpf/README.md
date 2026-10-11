@@ -24,6 +24,8 @@
 
 原 `CertFlag` 的 `Reconnect` 字段仍按原格式保存，界面改称“后台探测（分）”，与新选项独立。
 
+维护者于 2026-10-11 反馈实际测试通过：在设备管理器禁用后恢复联网网卡，自动重新认证成功，状态显示“已认证”，按钮显示“断开认证”。此实测结论只对应维护者本机与校园网环境。v1.0.3 正式版沿用这次验证通过的 EXE，更新发布说明和使用文档，不重新编译主程序。
+
 运行 `pwsh -File .\desktop-wpf\tests\run-reconnection-checks.ps1 -OutputDirectory C:\Temp\mentohust-reconnect` 检查策略和取消；单文件程序的 `--ui-reconnect-checks C:\Temp\mentohust-ui-reconnect` 使用模拟后台验证共享 STOP／START 路径与取消按钮，无真实认证或断网。`ReconnectionChecks.exe --probe` 只读显示本机适配器的 Windows 状态。
 
 ## 单文件发布
