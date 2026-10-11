@@ -1,8 +1,6 @@
-# MentoHUST4JNU
+# MentoHUST For JNU
 
 为暨南大学锐捷 6.61 认证环境提供 WPF 桌面界面，基于 [Hjdd14/mentohust-windows-jnu](https://github.com/Hjdd14/mentohust-windows-jnu) 开发。通过独立 C++ 后台复用原认证核心，账号与参数继续兼容旧配置。
-
-本仓库是由 [1nvincibleZz](https://github.com/1nvincibleZz) 独立维护的 MentoHUST4JNU 版本。WPF 界面、开机自动认证、热点辅助和单文件打包在此维护与发布；认证核心沿用原项目，保留原作者署名、版权声明和提交历史。本版本不代表上游官方发布。
 
 ## 界面
 
@@ -68,7 +66,7 @@ Windows 11 已自带所需的 .NET Framework，不需要安装 Visual Studio、P
 
 勾选“认证成功后最小化到托盘”，认证成功后会稍等半秒再收起。点击任务栏右下角的程序图标，可以重新打开窗口。
 
-需要认证后开启热点时，可以勾选对应选项，旁边的问号提供功能说明。热点名称和密码在 Windows 的“移动热点”设置中修改。
+需要认证后开启热点时，可以勾选对应选项，旁边的问号提供功能说明(PS:解除锐捷热点限制)。热点名称和密码在 Windows 的“移动热点”设置中修改。
 
 如果热点操作提示权限不足，请关闭程序，再右键选择“以管理员身份运行”。
 
