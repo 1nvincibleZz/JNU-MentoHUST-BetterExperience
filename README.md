@@ -1,4 +1,4 @@
-# MentoHUST Windows JNU BetterUI
+# JNU MentoHUST BetterUI
 
 为暨南大学锐捷 6.61 认证环境提供 WPF 桌面界面，基于 [Hjdd14/mentohust-windows-jnu](https://github.com/Hjdd14/mentohust-windows-jnu) 开发。通过独立 C++ 后台复用原认证核心，账号与参数继续兼容旧配置。
 
@@ -24,7 +24,7 @@
 
 ### 1. 下载程序
 
-打开 [Release 下载页面](https://github.com/1nvincibleZz/MentoHUST-BetterUI/releases)，下载 `MentoHUST-BetterUI-版本号.zip`。
+打开 [Release 下载页面](https://github.com/1nvincibleZz/JNU-MentoHUST-BetterUI/releases)，下载 `MentoHUST-BetterUI-版本号.zip`。
 
 请下载程序 ZIP，日常使用不需要下载 GitHub 自动提供的 `Source code`。
 
