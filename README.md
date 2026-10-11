@@ -2,6 +2,8 @@
 
 为暨南大学锐捷 6.61 认证环境提供 WPF 桌面界面，基于 [Hjdd14/mentohust-windows-jnu](https://github.com/Hjdd14/mentohust-windows-jnu) 开发。通过独立 C++ 后台复用原认证核心，账号与参数继续兼容旧配置。
 
+本仓库是由 [1nvincibleZz](https://github.com/1nvincibleZz) 独立维护的 BetterUI 版本。WPF 界面、开机自动认证、热点辅助和单文件打包在此维护与发布；认证核心沿用原项目，保留原作者署名、版权声明和提交历史。本版本不代表上游官方发布。
+
 ## 界面
 
 | 首页 | 参数设置 |
@@ -22,7 +24,7 @@
 
 ### 1. 下载程序
 
-打开 [Release 下载页面](https://github.com/1nvincibleZz/mentohust-windows-jnu-BetterUI/releases)，下载 `MentoHUST-BetterUI-版本号.zip`。
+打开 [Release 下载页面](https://github.com/1nvincibleZz/MentoHUST-BetterUI/releases)，下载 `MentoHUST-BetterUI-版本号.zip`。
 
 请下载程序 ZIP，日常使用不需要下载 GitHub 自动提供的 `Source code`。
 
